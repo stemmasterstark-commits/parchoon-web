@@ -3,10 +3,12 @@
 import { useState } from 'react';
 import { useCart } from '@/context/CartContext';
 import PincodeModal from './PincodeModal';
+import CartDrawer from './CartDrawer';
 
 export default function Navbar() {
   const { pincode, locationName, cart } = useCart();
   const [isModalOpen, setIsModalOpen] = useState(false);
+  const [isCartOpen, setIsCartOpen] = useState(false);
 
   const totalItems = cart.reduce((sum, item) => sum + item.quantity, 0);
 
@@ -16,7 +18,7 @@ export default function Navbar() {
         <div className="max-w-7xl mx-auto flex items-center justify-between">
           <div className="flex items-center gap-6">
             <span className="text-2xl font-black text-emerald-600 tracking-tight">Parchoon</span>
-            
+
             <button
               onClick={() => setIsModalOpen(true)}
               className="flex items-center gap-2 bg-gray-50 hover:bg-gray-100 px-3 py-1.5 rounded-lg border border-gray-200 text-xs font-medium text-gray-700"
@@ -28,14 +30,18 @@ export default function Navbar() {
           </div>
 
           <div className="flex items-center gap-4">
-            <div className="relative cursor-pointer bg-emerald-50 px-3 py-1.5 rounded-lg border border-emerald-200">
-              <span className="text-sm font-semibold text-emerald-800">🛒 Cart ({totalItems})</span>
-            </div>
+            <button
+              onClick={() => setIsCartOpen(true)}
+              className="relative bg-emerald-50 hover:bg-emerald-100 px-4 py-2 rounded-xl border border-emerald-200 transition"
+            >
+              <span className="text-sm font-bold text-emerald-800">🛒 Cart ({totalItems})</span>
+            </button>
           </div>
         </div>
       </nav>
 
       <PincodeModal isOpen={isModalOpen || !pincode} onClose={() => setIsModalOpen(false)} />
+      <CartDrawer isOpen={isCartOpen} onClose={() => setIsCartOpen(false)} />
     </>
   );
 }
