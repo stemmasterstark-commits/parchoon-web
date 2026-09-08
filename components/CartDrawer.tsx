@@ -1,6 +1,7 @@
 'use client';
 
 import { useState } from 'react';
+import Link from 'next/link';
 import { useCart } from '@/context/CartContext';
 import { supabase } from '@/lib/supabaseClient';
 
@@ -19,11 +20,11 @@ export default function CartDrawer({ isOpen, onClose }: { isOpen: boolean; onClo
 
     setLoading(true);
 
-    // 1. Generated customer handover OTP
+    // 1. Generate customer handover OTP
     const customerHandoverOtp = Math.floor(1000 + Math.random() * 9000).toString();
     const storeId = cart[0].store_id;
 
-    // 2. Inserted into orders without forcing an unmapped customer_id FK constraint
+    // 2. Insert order
     const { data: orderData, error: orderError } = await supabase
       .from('orders')
       .insert([
@@ -50,7 +51,7 @@ export default function CartDrawer({ isOpen, onClose }: { isOpen: boolean; onClo
       return;
     }
 
-    // 3. Inserted line items matching column naming in Supabase
+    // 3. Insert order items
     const orderItems = cart.map((item) => ({
       order_id: orderData.id,
       product_id: item.id,
@@ -85,7 +86,7 @@ export default function CartDrawer({ isOpen, onClose }: { isOpen: boolean; onClo
             </button>
           </div>
 
-          {/* Cart Items List */}
+          {/* Cart Items / Order Success View */}
           <div className="p-6 flex-1 overflow-y-auto space-y-4">
             {orderPlaced ? (
               <div className="bg-emerald-50 border border-emerald-200 p-6 rounded-2xl text-center space-y-4">
@@ -105,15 +106,28 @@ export default function CartDrawer({ isOpen, onClose }: { isOpen: boolean; onClo
                   </p>
                 </div>
 
-                <button
-                  onClick={() => {
-                    setOrderPlaced(null);
-                    onClose();
-                  }}
-                  className="w-full bg-emerald-600 text-white font-bold py-3 rounded-xl text-sm"
-                >
-                  Done
-                </button>
+                <div className="space-y-2 pt-2">
+                  <Link
+                    href={`/orders/${orderPlaced.id}`}
+                    onClick={() => {
+                      setOrderPlaced(null);
+                      onClose();
+                    }}
+                    className="block w-full bg-emerald-600 hover:bg-emerald-700 text-white font-bold py-3 rounded-xl text-xs text-center transition"
+                  >
+                    Track Live Order Status 🛵
+                  </Link>
+
+                  <button
+                    onClick={() => {
+                      setOrderPlaced(null);
+                      onClose();
+                    }}
+                    className="w-full bg-white border border-gray-300 text-gray-700 font-bold py-2.5 rounded-xl text-xs hover:bg-gray-50"
+                  >
+                    Close
+                  </button>
+                </div>
               </div>
             ) : cart.length === 0 ? (
               <div className="text-center py-16 text-gray-400">
