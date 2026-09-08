@@ -32,7 +32,7 @@ export default function Navbar() {
           <div className="flex items-center gap-4">
             <button
               onClick={() => setIsCartOpen(true)}
-              className="relative bg-emerald-50 hover:bg-emerald-100 px-4 py-2 rounded-xl border border-emerald-200 transition"
+              className="relative bg-emerald-50 hover:bg-emerald-100 px-4 py-2 rounded-xl border border-emerald-200 transition cursor-pointer"
             >
               <span className="text-sm font-bold text-emerald-800">🛒 Cart ({totalItems})</span>
             </button>
