@@ -1,17 +1,25 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import { supabase } from '@/lib/supabaseClient';
 
-export default function RiderDashboard() {
-  const [orders, setOrders] = useState<any[]>([]);
-  const [inputOtp, setInputOtp] = useState<{ [key: string]: string }>({});
+interface Order {
+  id: string;
+  order_status: string;
+  delivery_address: string;
+  total_amount: number;
+}
 
-  const fetchRiderOrders = async () => {
+export default function RiderApp() {
+  const [orders, setOrders] = useState<Order[]>([]);
+  const [inputOtps, setInputOtps] = useState<{ [key: string]: string }>({});
+  const [loadingId, setLoadingId] = useState<string | null>(null);
+
+  const fetchAssignedOrders = async () => {
     const { data, error } = await supabase
       .from('orders')
-      .select('*')
-      .in('order_status', ['PACKED', 'OUT_FOR_DELIVERY', 'DELIVERED'])
+      .select('id, order_status, delivery_address, total_amount')
+      .in('order_status', ['PENDING', 'ACCEPTED', 'OUT_FOR_DELIVERY'])
       .order('created_at', { ascending: false });
 
     if (!error && data) {
@@ -20,140 +28,106 @@ export default function RiderDashboard() {
   };
 
   useEffect(() => {
-    fetchRiderOrders();
-
-    const channel = supabase
-      .channel('rider_otp_channel')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'orders' }, () => fetchRiderOrders())
-      .subscribe();
-
-    return () => {
-      supabase.removeChannel(channel);
-    };
+    fetchAssignedOrders();
   }, []);
 
-  const handleOtpChange = (orderId: string, value: string) => {
-    setInputOtp((prev) => ({ ...prev, [orderId]: value }));
-  };
+  const handleVerifyStorePickup = async (orderId: string) => {
+    const enteredOtp = inputOtps[orderId]?.trim();
 
-  // 1. Validate Store Pickup OTP (Store -> Rider Handover)
-  const verifyStoreOtp = async (order: any) => {
-    const enteredOtp = inputOtp[order.id];
-
-    if (enteredOtp !== order.store_otp) {
-      alert('Invalid Store Pickup OTP! Please check with the merchant.');
+    if (!enteredOtp || enteredOtp.length !== 4) {
+      alert('Please enter a valid 4-digit Store OTP.');
       return;
     }
 
-    const { error } = await supabase
+    setLoadingId(orderId);
+
+    // Fetch the stored store_otp for verification
+    const { data: order, error } = await supabase
+      .from('orders')
+      .select('store_otp')
+      .eq('id', orderId)
+      .single();
+
+    if (error || !order) {
+      alert('Failed to verify OTP. Order not found.');
+      setLoadingId(null);
+      return;
+    }
+
+    // Direct string comparison
+    if (String(order.store_otp).trim() !== enteredOtp) {
+      alert('Invalid Store OTP! Please verify with the merchant.');
+      setLoadingId(null);
+      return;
+    }
+
+    // Update order status upon successful verification
+    const { error: updateError } = await supabase
       .from('orders')
       .update({ order_status: 'OUT_FOR_DELIVERY' })
-      .eq('id', order.id);
+      .eq('id', orderId);
 
-    if (error) {
-      alert('Failed to update status: ' + error.message);
+    setLoadingId(null);
+
+    if (updateError) {
+      alert('Failed to update status: ' + updateError.message);
     } else {
-      alert('Store OTP Verified! Order picked up.');
-      setInputOtp((prev) => ({ ...prev, [order.id]: '' }));
-      fetchRiderOrders();
-    }
-  };
-
-  // 2. Validate Customer Delivery Handover OTP (Rider -> Customer Handover)
-  const verifyCustomerOtp = async (order: any) => {
-    const enteredOtp = inputOtp[order.id];
-
-    if (enteredOtp !== order.customer_otp) {
-      alert('Invalid Customer Delivery OTP! Please ask customer for correct 4-digit code.');
-      return;
-    }
-
-    const { error } = await supabase
-      .from('orders')
-      .update({ order_status: 'DELIVERED' })
-      .eq('id', order.id);
-
-    if (error) {
-      alert('Failed to complete delivery: ' + error.message);
-    } else {
-      alert('Customer OTP Verified! Order successfully delivered.');
-      setInputOtp((prev) => ({ ...prev, [order.id]: '' }));
-      fetchRiderOrders();
+      alert('Pickup verified! Order status updated to OUT FOR DELIVERY.');
+      fetchAssignedOrders();
     }
   };
 
   return (
-    <div className="p-6 max-w-4xl mx-auto min-h-screen bg-gray-50">
-      <h1 className="text-2xl font-bold text-gray-900 mb-6">Rider Active Deliveries</h1>
+    <div className="min-h-screen bg-gray-50 p-6">
+      <div className="max-w-md mx-auto space-y-6">
+        <div className="bg-white p-6 rounded-2xl border border-gray-100 shadow-sm text-center">
+          <span className="text-3xl">🛵</span>
+          <h1 className="text-xl font-bold text-gray-900 mt-2">Parchoon Rider Partner</h1>
+          <p className="text-xs text-gray-500">Verify store pickup using merchant OTP</p>
+        </div>
 
-      <div className="space-y-4">
-        {orders.map((order) => (
-          <div key={order.id} className="p-5 bg-white border border-gray-200 rounded-2xl shadow-sm space-y-3">
-            <div className="flex justify-between items-start">
-              <div>
-                <p className="font-bold text-gray-800 text-sm">Order #{order.id.slice(0, 8)}</p>
-                <p className="text-xs text-gray-500 mt-0.5">{order.delivery_address}</p>
+        <div className="space-y-4">
+          {orders.map((order) => (
+            <div key={order.id} className="bg-white p-5 rounded-2xl border border-gray-100 shadow-sm space-y-4">
+              <div className="flex justify-between items-center">
+                <span className="text-xs font-mono text-gray-400">#{order.id.slice(0, 8)}</span>
+                <span className="text-xs font-bold px-2.5 py-1 bg-emerald-50 text-emerald-700 rounded-full border border-emerald-200">
+                  {order.order_status}
+                </span>
               </div>
-              <span
-                className={`text-xs px-2.5 py-1 rounded-full font-bold ${
-                  order.order_status === 'PACKED'
-                    ? 'bg-purple-100 text-purple-800'
-                    : order.order_status === 'OUT_FOR_DELIVERY'
-                    ? 'bg-blue-100 text-blue-800'
-                    : 'bg-emerald-100 text-emerald-800'
-                }`}
-              >
-                {order.order_status}
-              </span>
+
+              <p className="text-xs text-gray-700 font-medium">{order.delivery_address}</p>
+
+              {order.order_status !== 'OUT_FOR_DELIVERY' && (
+                <div className="space-y-2 pt-2 border-t">
+                  <label className="block text-xs font-semibold text-gray-600">Enter Merchant Store OTP</label>
+                  <div className="flex gap-2">
+                    <input
+                      type="text"
+                      maxLength={4}
+                      placeholder="4-digit OTP"
+                      value={inputOtps[order.id] || ''}
+                      onChange={(e) =>
+                        setInputOtps({
+                          ...inputOtps,
+                          [order.id]: e.target.value.replace(/\D/g, ''),
+                        })
+                      }
+                      className="flex-1 px-3 py-2 text-center text-lg font-mono border border-gray-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-emerald-500 text-gray-900"
+                    />
+                    <button
+                      onClick={() => handleVerifyStorePickup(order.id)}
+                      disabled={loadingId === order.id}
+                      className="bg-emerald-600 hover:bg-emerald-700 text-white font-bold px-4 py-2 text-xs rounded-xl transition disabled:bg-gray-300"
+                    >
+                      {loadingId === order.id ? 'Verifying...' : 'Confirm Pickup'}
+                    </button>
+                  </div>
+                </div>
+              )}
             </div>
-
-            {/* Step 1 Verification: Store Pickup */}
-            {order.order_status === 'PACKED' && (
-              <div className="p-3 bg-purple-50 border border-purple-100 rounded-xl space-y-2">
-                <p className="text-xs font-semibold text-purple-900">Enter Store Pickup OTP from Merchant:</p>
-                <div className="flex gap-2">
-                  <input
-                    type="text"
-                    maxLength={4}
-                    placeholder="4-digit OTP"
-                    value={inputOtp[order.id] || ''}
-                    onChange={(e) => handleOtpChange(order.id, e.target.value)}
-                    className="px-3 py-1.5 text-sm border rounded-lg w-32 font-mono text-center text-gray-900"
-                  />
-                  <button
-                    onClick={() => verifyStoreOtp(order)}
-                    className="px-4 py-1.5 bg-purple-600 hover:bg-purple-700 text-white rounded-lg text-xs font-bold"
-                  >
-                    Confirm Pickup
-                  </button>
-                </div>
-              </div>
-            )}
-
-            {/* Step 2 Verification: Customer Handover */}
-            {order.order_status === 'OUT_FOR_DELIVERY' && (
-              <div className="p-3 bg-blue-50 border border-blue-100 rounded-xl space-y-2">
-                <p className="text-xs font-semibold text-blue-900">Enter Handover OTP from Customer:</p>
-                <div className="flex gap-2">
-                  <input
-                    type="text"
-                    maxLength={4}
-                    placeholder="4-digit OTP"
-                    value={inputOtp[order.id] || ''}
-                    onChange={(e) => handleOtpChange(order.id, e.target.value)}
-                    className="px-3 py-1.5 text-sm border rounded-lg w-32 font-mono text-center text-gray-900"
-                  />
-                  <button
-                    onClick={() => verifyCustomerOtp(order)}
-                    className="px-4 py-1.5 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-xs font-bold"
-                  >
-                    Complete Delivery
-                  </button>
-                </div>
-              </div>
-            )}
-          </div>
-        ))}
+          ))}
+        </div>
       </div>
     </div>
   );
