@@ -19,26 +19,25 @@ export default function CartDrawer({ isOpen, onClose }: { isOpen: boolean; onClo
 
     setLoading(true);
 
-    // Generate random 4-digit OTPs for double-verification
-    const storePickupOtp = Math.floor(1000 + Math.random() * 9000).toString();
+    // 1. Generate customer handover OTP
     const customerHandoverOtp = Math.floor(1000 + Math.random() * 9000).toString();
-
-    // Group items by store (using first store item for demo)
     const storeId = cart[0].store_id;
 
-    // 1. Create order record in Supabase
+    // 2. Insert into orders matching Supabase schema exactly
     const { data: orderData, error: orderError } = await supabase
       .from('orders')
       .insert([
         {
           store_id: storeId,
-          delivery_address: address,
-          customer_phone: phone,
+          customer_id: '00000000-0000-0000-0000-000000000000', // Guest checkout placeholder
+          pincode: pincode || '673601',
+          delivery_address: `${address} | Phone: ${phone}`,
           items_total: cartTotal,
-          delivery_fee: 25,
-          total_amount: cartTotal + 25,
+          delivery_fee: 25.00,
+          convenience_fee: 0.00,
+          total_amount: cartTotal + 25.00,
           order_status: 'PENDING',
-          store_otp: storePickupOtp,
+          payment_status: 'SUCCESS',
           customer_otp: customerHandoverOtp,
         },
       ])
@@ -46,21 +45,29 @@ export default function CartDrawer({ isOpen, onClose }: { isOpen: boolean; onClo
       .single();
 
     if (orderError || !orderData) {
-      alert('Error creating order. Please try again.');
+      console.error('Order creation error:', orderError);
+      alert('Error creating order: ' + (orderError?.message || 'Database rejection'));
       setLoading(false);
       return;
     }
 
-    // 2. Insert order line items
+    // 3. Insert order items matching schema
     const orderItems = cart.map((item) => ({
       order_id: orderData.id,
       product_id: item.id,
-      title: item.title,
-      price: item.price,
       quantity: item.quantity,
+      price_per_unit: item.price,
+      total_price: item.price * item.quantity,
     }));
 
-    await supabase.from('order_items').insert(orderItems);
+    const { error: itemsError } = await supabase.from('order_items').insert(orderItems);
+
+    if (itemsError) {
+      console.error('Order items insertion error:', itemsError);
+      alert('Error saving cart items: ' + itemsError.message);
+      setLoading(false);
+      return;
+    }
 
     setLoading(false);
     clearCart();
@@ -157,7 +164,7 @@ export default function CartDrawer({ isOpen, onClose }: { isOpen: boolean; onClo
               <form onSubmit={handleCheckout} className="space-y-3">
                 <div>
                   <label className="block text-xs font-semibold text-gray-700 mb-1">
-                    Delivery Address ({pincode})
+                    Delivery Address ({pincode || '673601'})
                   </label>
                   <input
                     type="text"
