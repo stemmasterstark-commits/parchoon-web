@@ -19,17 +19,16 @@ export default function CartDrawer({ isOpen, onClose }: { isOpen: boolean; onClo
 
     setLoading(true);
 
-    // 1. Generate customer handover OTP
+    // 1. Generated customer handover OTP
     const customerHandoverOtp = Math.floor(1000 + Math.random() * 9000).toString();
     const storeId = cart[0].store_id;
 
-    // 2. Insert into orders matching Supabase schema exactly
+    // 2. Inserted into orders without forcing an unmapped customer_id FK constraint
     const { data: orderData, error: orderError } = await supabase
       .from('orders')
       .insert([
         {
           store_id: storeId,
-          customer_id: '00000000-0000-0000-0000-000000000000', // Guest checkout placeholder
           pincode: pincode || '673601',
           delivery_address: `${address} | Phone: ${phone}`,
           items_total: cartTotal,
@@ -51,7 +50,7 @@ export default function CartDrawer({ isOpen, onClose }: { isOpen: boolean; onClo
       return;
     }
 
-    // 3. Insert order items matching schema
+    // 3. Inserted line items matching column naming in Supabase
     const orderItems = cart.map((item) => ({
       order_id: orderData.id,
       product_id: item.id,
