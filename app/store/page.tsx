@@ -1,83 +1,124 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useState, Suspense } from 'react';
+import { useSearchParams } from 'next/navigation';
 import Navbar from '@/components/Navbar';
+import CartDrawer from '@/components/CartDrawer';
 import { supabase } from '@/lib/supabaseClient';
-import Link from 'next/link';
+import { useCart } from '@/context/CartContext';
 
-interface Store {
-  id: string;
-  name: string;
-  category: string;
-  rating: number;
-  pincode: string;
-  image_url: string;
-  is_active: boolean;
-}
+function StoreContent() {
+  const searchParams = useSearchParams();
+  const storeId = searchParams.get('id');
 
-export default function StoresPage() {
-  const [stores, setStores] = useState<Store[]>([]);
+  const [store, setStore] = useState<any>(null);
+  const [products, setProducts] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
+  const [isCartOpen, setIsCartOpen] = useState(false);
+
+  const { addToCart } = useCart();
 
   useEffect(() => {
-    async function fetchStores() {
-      const { data, error } = await supabase
-        .from('stores')
-        .select('*')
-        .eq('is_active', true);
+    async function fetchStoreAndProducts() {
+      setLoading(true);
 
-      if (!error && data) {
-        setStores(data);
+      // Fetch store details or default to first active store if no ID provided
+      let currentStoreId = storeId;
+      if (!currentStoreId) {
+        const { data: defaultStore } = await supabase.from('stores').select('id').limit(1).single();
+        if (defaultStore) currentStoreId = defaultStore.id;
       }
+
+      if (currentStoreId) {
+        const { data: storeData } = await supabase
+          .from('stores')
+          .select('*')
+          .eq('id', currentStoreId)
+          .single();
+        setStore(storeData);
+
+        const { data: productData } = await supabase
+          .from('products')
+          .select('*')
+          .eq('store_id', currentStoreId);
+        if (productData) setProducts(productData);
+      }
+
       setLoading(false);
     }
-    fetchStores();
-  }, []);
+
+    fetchStoreAndProducts();
+  }, [storeId]);
 
   return (
-    <div className="min-h-screen bg-gray-50">
+    <div className="min-h-screen bg-gray-50 pb-20">
       <Navbar />
 
       <main className="max-w-7xl mx-auto px-4 py-8">
-        <h1 className="text-3xl font-extrabold text-gray-900 mb-2">
-          Partner Stores in Kattangal
-        </h1>
-        <p className="text-gray-500 mb-8 text-sm">
-          Select a local shop to browse items and place an instant delivery order.
-        </p>
-
         {loading ? (
-          <div className="text-center py-12 text-gray-400">Loading stores near you...</div>
-        ) : stores.length === 0 ? (
-          <div className="text-center py-12 text-gray-400">
-            No active stores found in this area.
-          </div>
+          <div className="text-center py-12 text-gray-400">Loading store products...</div>
         ) : (
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-            {stores.map((store) => (
-              <Link
-                key={store.id}
-                href={`/store?id=${store.id}`}
-                className="bg-white rounded-2xl border border-gray-100 p-5 shadow-sm hover:shadow-md transition flex items-center gap-4"
-              >
-                <div className="w-20 h-20 bg-emerald-50 rounded-xl flex items-center justify-center text-3xl shrink-0">
-                  🏬
-                </div>
-                <div>
-                  <h3 className="font-bold text-gray-900 text-lg">{store.name}</h3>
-                  <p className="text-xs text-gray-500 font-medium">{store.category}</p>
-                  <div className="flex items-center gap-2 mt-2 text-xs">
-                    <span className="bg-emerald-100 text-emerald-800 px-2 py-0.5 rounded-md font-bold">
-                      ⭐ {store.rating || '4.8'}
-                    </span>
-                    <span className="text-gray-400">• Pincode {store.pincode}</span>
+          <>
+            <div className="bg-white p-6 rounded-2xl border shadow-sm mb-8 flex items-center gap-4">
+              <div className="w-16 h-16 bg-emerald-100 text-3xl rounded-xl flex items-center justify-center">
+                🏪
+              </div>
+              <div>
+                <h1 className="text-2xl font-black text-gray-900">
+                  {store?.name || 'Grocery & Essentials'}
+                </h1>
+                <p className="text-xs text-gray-500">{store?.category || 'Supermarket'}</p>
+              </div>
+            </div>
+
+            <h2 className="text-lg font-bold text-gray-900 mb-4">Available Items</h2>
+
+            {products.length === 0 ? (
+              <div className="text-center py-12 text-gray-400 bg-white rounded-2xl border">
+                No items listed in this store yet.
+              </div>
+            ) : (
+              <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
+                {products.map((product) => (
+                  <div key={product.id} className="bg-white border rounded-2xl p-4 shadow-sm flex flex-col justify-between">
+                    <div>
+                      <div className="h-32 bg-gray-50 rounded-xl mb-3 flex items-center justify-center overflow-hidden">
+                        {product.image_url ? (
+                          <img src={product.image_url} alt={product.title} className="h-full object-cover" />
+                        ) : (
+                          <span className="text-3xl">🛍️</span>
+                        )}
+                      </div>
+                      <h3 className="font-bold text-sm text-gray-800 line-clamp-1">{product.title}</h3>
+                      <p className="text-xs text-gray-400 mt-1">{product.unit || '1 unit'}</p>
+                    </div>
+
+                    <div className="mt-4 flex items-center justify-between">
+                      <span className="font-extrabold text-sm text-gray-900">₹{product.price}</span>
+                      <button
+                        onClick={() => addToCart(product)}
+                        className="bg-emerald-600 hover:bg-emerald-700 text-white font-bold px-3 py-1.5 rounded-lg text-xs"
+                      >
+                        + Add
+                      </button>
+                    </div>
                   </div>
-                </div>
-              </Link>
-            ))}
-          </div>
+                ))}
+              </div>
+            )}
+          </>
         )}
       </main>
+
+      <CartDrawer isOpen={isCartOpen} onClose={() => setIsCartOpen(false)} />
     </div>
+  );
+}
+
+export default function StorePage() {
+  return (
+    <Suspense fallback={<div className="p-8 text-center">Loading...</div>}>
+      <StoreContent />
+    </Suspense>
   );
 }

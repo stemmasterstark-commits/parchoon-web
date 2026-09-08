@@ -6,10 +6,10 @@ import { supabase } from '@/lib/supabaseClient';
 export default function RiderPage() {
   const [orders, setOrders] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
-  const [otpInputs, setOtpInputs] = useState<{ [key: string]: string }>({});
+  const [merchantOtpInputs, setMerchantOtpInputs] = useState<{ [key: string]: string }>({});
+  const [customerOtpInputs, setCustomerOtpInputs] = useState<{ [key: string]: string }>({});
 
   const fetchRiderOrders = async () => {
-    // Fetch orders that are ready for pickup (PACKED) or currently active (OUT_FOR_DELIVERY)
     const { data, error } = await supabase
       .from('orders')
       .select('*')
@@ -22,15 +22,11 @@ export default function RiderPage() {
     setLoading(false);
   };
 
-  const handleOtpChange = (orderId: string, val: string) => {
-    setOtpInputs((prev) => ({ ...prev, [orderId]: val.replace(/\D/g, '') }));
-  };
-
   const handleVerifyStorePickup = async (orderId: string, expectedOtp: string) => {
-    const enteredOtp = otpInputs[orderId] || '';
+    const enteredOtp = merchantOtpInputs[orderId] || '';
 
     if (enteredOtp.trim() !== expectedOtp?.trim()) {
-      alert('Invalid Store OTP! Please check with the merchant.');
+      alert('Invalid Merchant OTP! Please check with the store manager.');
       return;
     }
 
@@ -48,10 +44,31 @@ export default function RiderPage() {
     fetchRiderOrders();
   };
 
+  const handleVerifyCustomerDelivery = async (orderId: string, expectedOtp: string) => {
+    const enteredOtp = customerOtpInputs[orderId] || '';
+
+    if (enteredOtp.trim() !== expectedOtp?.trim()) {
+      alert('Invalid Customer OTP! Please ask the customer to recheck their screen/SMS.');
+      return;
+    }
+
+    const { error } = await supabase
+      .from('orders')
+      .update({ order_status: 'DELIVERED' })
+      .eq('id', orderId);
+
+    if (error) {
+      alert('Failed to mark delivered: ' + error.message);
+      return;
+    }
+
+    alert('Order successfully DELIVERED!');
+    fetchRiderOrders();
+  };
+
   useEffect(() => {
     fetchRiderOrders();
 
-    // Subscribe to realtime order updates
     const channel = supabase
       .channel('rider-orders')
       .on(
@@ -72,14 +89,14 @@ export default function RiderPage() {
         <div className="text-center space-y-1">
           <span className="text-3xl">🛵</span>
           <h1 className="text-2xl font-black text-gray-900">Parchoon Rider Partner</h1>
-          <p className="text-xs text-gray-500">Verify store pickup using merchant OTP</p>
+          <p className="text-xs text-gray-500">Manage store pickups and customer deliveries</p>
         </div>
 
         {loading ? (
           <div className="text-center py-8 text-gray-400">Loading orders...</div>
         ) : orders.length === 0 ? (
           <div className="text-center py-8 text-gray-400 bg-white rounded-2xl border p-6">
-            No packed orders available for pickup right now.
+            No active orders available right now.
           </div>
         ) : (
           orders.map((order) => (
@@ -101,6 +118,7 @@ export default function RiderPage() {
                 {order.delivery_address}
               </p>
 
+              {/* Stage 1: Store Pickup Verification */}
               {order.order_status === 'PACKED' && (
                 <div className="space-y-2 pt-2 border-t">
                   <label className="block text-xs font-semibold text-gray-700">
@@ -110,9 +128,14 @@ export default function RiderPage() {
                     <input
                       type="text"
                       maxLength={4}
-                      placeholder="4-digit OTP"
-                      value={otpInputs[order.id] || ''}
-                      onChange={(e) => handleOtpChange(order.id, e.target.value)}
+                      placeholder="4-digit Merchant OTP"
+                      value={merchantOtpInputs[order.id] || ''}
+                      onChange={(e) =>
+                        setMerchantOtpInputs((prev) => ({
+                          ...prev,
+                          [order.id]: e.target.value.replace(/\D/g, ''),
+                        }))
+                      }
                       className="flex-1 px-3 py-2 text-sm font-mono border rounded-xl focus:outline-none focus:ring-2 focus:ring-purple-500 text-gray-900"
                     />
                     <button
@@ -120,6 +143,36 @@ export default function RiderPage() {
                       className="bg-purple-600 hover:bg-purple-700 text-white font-bold text-xs px-4 rounded-xl"
                     >
                       Confirm Pickup
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              {/* Stage 2: Customer Handover Verification */}
+              {order.order_status === 'OUT_FOR_DELIVERY' && (
+                <div className="space-y-2 pt-2 border-t">
+                  <label className="block text-xs font-semibold text-gray-700">
+                    Enter Customer Handover OTP
+                  </label>
+                  <div className="flex gap-2">
+                    <input
+                      type="text"
+                      maxLength={4}
+                      placeholder="4-digit Customer OTP"
+                      value={customerOtpInputs[order.id] || ''}
+                      onChange={(e) =>
+                        setCustomerOtpInputs((prev) => ({
+                          ...prev,
+                          [order.id]: e.target.value.replace(/\D/g, ''),
+                        }))
+                      }
+                      className="flex-1 px-3 py-2 text-sm font-mono border rounded-xl focus:outline-none focus:ring-2 focus:ring-emerald-500 text-gray-900"
+                    />
+                    <button
+                      onClick={() => handleVerifyCustomerDelivery(order.id, order.customer_otp)}
+                      className="bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs px-4 rounded-xl"
+                    >
+                      Mark Delivered
                     </button>
                   </div>
                 </div>
