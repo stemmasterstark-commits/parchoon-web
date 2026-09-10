@@ -1,256 +1,220 @@
+// app/merchant/inventory/page.tsx
 'use client';
 
-import { useEffect, useState } from 'react';
-import Link from 'next/link';
+import { useState, useEffect, Suspense } from 'react';
+import { useSearchParams } from 'next/navigation';
 import { supabase } from '@/lib/supabaseClient';
+import AddProductModal from '@/components/AddProductModal';
 
-export default function MerchantInventoryPage() {
-  const [products, setProducts] = useState<any[]>([]);
-  const [stores, setStores] = useState<any[]>([]);
-  const [selectedStoreId, setSelectedStoreId] = useState<string>('');
+interface Product {
+  id: string;
+  store_id: string;
+  title: string;
+  category: string;
+  price: number;
+  stock_quantity: number;
+  is_available: boolean;
+  image_url: string | null;
+}
+
+interface Store {
+  id: string;
+  name: string;
+  city: string;
+}
+
+function InventoryContent() {
+  const searchParams = useSearchParams();
+  const queryStoreId = searchParams.get('storeId');
+
+  const [stores, setStores] = useState<Store[]>([]);
+  const [selectedStoreId, setSelectedStoreId] = useState<string>(queryStoreId || '');
+  const [products, setProducts] = useState<Product[]>([]);
   const [loading, setLoading] = useState(true);
+  const [updatingId, setUpdatingId] = useState<string | null>(null);
+  const [isModalOpen, setIsModalOpen] = useState(false);
 
-  // New Product Form State
-  const [title, setTitle] = useState('');
-  const [price, setPrice] = useState('');
-  const [category, setCategory] = useState('Groceries');
-  const [imageUrl, setImageUrl] = useState('');
-  const [isAdding, setIsAdding] = useState(false);
-
-  // 1. Fetch available stores
-  const fetchStores = async () => {
-    const { data, error } = await supabase.from('stores').select('*').order('name');
-    if (!error && data && data.length > 0) {
-      setStores(data);
-      setSelectedStoreId(data[0].id);
-    }
-  };
-
-  // 2. Fetch inventory for selected store
-  const fetchProducts = async (storeId: string) => {
-    if (!storeId) return;
-    setLoading(true);
-    const { data, error } = await supabase
-      .from('products')
-      .select('*')
-      .eq('store_id', storeId)
-      .order('created_at', { ascending: false });
-
-    if (!error && data) {
-      setProducts(data);
-    }
-    setLoading(false);
-  };
-
-  // 3. Toggle Stock Status
-  const toggleStockStatus = async (productId: string, currentStatus: boolean) => {
-    const { error } = await supabase
-      .from('products')
-      .update({ is_available: !currentStatus })
-      .eq('id', productId);
-
-    if (error) {
-      alert('Failed to update stock: ' + error.message);
-      return;
-    }
-
-    setProducts((prev) =>
-      prev.map((p) => (p.id === productId ? { ...p, is_available: !currentStatus } : p))
-    );
-  };
-
-  // 4. Add New Product
-  const handleAddProduct = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!title || !price || !selectedStoreId) return;
-
-    setIsAdding(true);
-    const { data, error } = await supabase
-      .from('products')
-      .insert([
-        {
-          store_id: selectedStoreId,
-          title,
-          price: parseFloat(price),
-          category,
-          image_url: imageUrl || 'https://images.unsplash.com/photo-1542838132-92c53300491e?auto=format&fit=crop&q=80&w=300',
-          is_available: true,
-        },
-      ])
-      .select()
-      .single();
-
-    setIsAdding(false);
-
-    if (error) {
-      alert('Error adding product: ' + error.message);
-      return;
-    }
-
-    alert('Product added successfully!');
-    setTitle('');
-    setPrice('');
-    setImageUrl('');
-    if (data) setProducts((prev) => [data, ...prev]);
-  };
-
+  // 1. Fetch stores owned by manager or all available stores
   useEffect(() => {
+    async function fetchStores() {
+      const { data } = await supabase.from('stores').select('id, name, city').eq('is_active', true);
+      if (data && data.length > 0) {
+        setStores(data);
+        if (!selectedStoreId) {
+          setSelectedStoreId(data[0].id);
+        }
+      }
+    }
     fetchStores();
   }, []);
 
+  // 2. Fetch products whenever selectedStoreId changes
   useEffect(() => {
-    if (selectedStoreId) {
-      fetchProducts(selectedStoreId);
+    if (!selectedStoreId) return;
+
+    async function fetchProducts() {
+      setLoading(true);
+      const { data, error } = await supabase
+        .from('products')
+        .select('*')
+        .eq('store_id', selectedStoreId)
+        .order('created_at', { ascending: false });
+
+      if (!error) {
+        setProducts(data || []);
+      }
+      setLoading(false);
     }
+
+    fetchProducts();
   }, [selectedStoreId]);
 
-  return (
-    <div className="min-h-screen bg-gray-50 p-6 pb-16">
-      <div className="max-w-3xl mx-auto space-y-6">
-        {/* Navigation & Header */}
-        <div className="flex justify-between items-center bg-white p-6 rounded-2xl border shadow-sm">
-          <div>
-            <span className="text-3xl">📦</span>
-            <h1 className="text-2xl font-black text-gray-900 mt-1">Inventory Manager</h1>
-            <p className="text-xs text-gray-500">Toggle availability & add new products</p>
-          </div>
-          <Link
-            href="/merchant"
-            className="text-xs font-bold text-indigo-600 bg-indigo-50 border border-indigo-100 px-4 py-2 rounded-xl hover:bg-indigo-100 transition"
-          >
-            ← Orders Dashboard
-          </Link>
-        </div>
+  // 3. Quick update for Stock or Availability
+  const handleUpdateProduct = async (id: string, updates: Partial<Product>) => {
+    setUpdatingId(id);
+    const { error } = await supabase.from('products').update(updates).eq('id', id);
 
-        {/* Store Switcher */}
-        {stores.length > 0 && (
-          <div className="bg-white p-4 rounded-2xl border shadow-sm flex items-center justify-between">
-            <label className="text-xs font-bold text-gray-700">Select Merchant Store:</label>
+    if (!error) {
+      setProducts((prev) =>
+        prev.map((p) => (p.id === id ? { ...p, ...updates } : p))
+      );
+    } else {
+      alert('Failed to update product stock.');
+    }
+    setUpdatingId(null);
+  };
+
+  return (
+    <div className="min-h-screen bg-gray-50 p-4 md:p-8">
+      <div className="max-w-6xl mx-auto">
+        {/* Header & Store Selector */}
+        <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 bg-white p-6 rounded-2xl shadow-sm border mb-6">
+          <div>
+            <h1 className="text-2xl font-bold text-gray-900">Inventory Management</h1>
+            <p className="text-xs text-gray-500 mt-1">Manage catalog, real-time stock levels, and item pricing.</p>
+          </div>
+
+          <div className="flex items-center gap-3 w-full md:w-auto">
             <select
               value={selectedStoreId}
               onChange={(e) => setSelectedStoreId(e.target.value)}
-              className="text-xs font-bold bg-gray-100 border rounded-xl px-3 py-2 text-gray-800 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+              className="px-4 py-2 border rounded-xl text-sm font-semibold text-gray-700 focus:ring-2 focus:ring-emerald-500 outline-none w-full md:w-auto"
             >
+              {stores.length === 0 && <option value="">No Stores Found</option>}
               {stores.map((s) => (
                 <option key={s.id} value={s.id}>
-                  {s.name} ({s.pincode})
+                  {s.name} ({s.city})
                 </option>
               ))}
             </select>
+
+            <button
+              onClick={() => setIsModalOpen(true)}
+              disabled={!selectedStoreId}
+              className="px-4 py-2 bg-emerald-600 text-white font-bold text-sm rounded-xl shadow hover:bg-emerald-700 transition whitespace-nowrap disabled:opacity-50"
+            >
+              + Add Product
+            </button>
+          </div>
+        </div>
+
+        {/* Product Inventory Table */}
+        {loading ? (
+          <div className="p-12 text-center text-gray-500 font-medium">Loading inventory...</div>
+        ) : products.length === 0 ? (
+          <div className="bg-white p-12 text-center rounded-2xl border border-dashed text-gray-500">
+            No products found for this store yet. Click <strong>+ Add Product</strong> to add your first item.
+          </div>
+        ) : (
+          <div className="bg-white rounded-2xl border shadow-sm overflow-hidden">
+            <div className="overflow-x-auto">
+              <table className="w-full text-left border-collapse text-sm">
+                <thead>
+                  <tr className="bg-gray-50 text-gray-600 text-xs uppercase border-b">
+                    <th className="py-3 px-4">Item</th>
+                    <th className="py-3 px-4">Category</th>
+                    <th className="py-3 px-4">Price (₹)</th>
+                    <th className="py-3 px-4">Stock Qty</th>
+                    <th className="py-3 px-4">Status</th>
+                    <th className="py-3 px-4 text-right">Actions</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-gray-100">
+                  {products.map((p) => (
+                    <tr key={p.id} className="hover:bg-gray-50/80 transition">
+                      <td className="py-3 px-4 font-semibold text-gray-900">{p.title}</td>
+                      <td className="py-3 px-4 text-xs text-gray-500">{p.category}</td>
+                      <td className="py-3 px-4 font-medium">
+                        ₹
+                        <input
+                          type="number"
+                          defaultValue={p.price}
+                          onBlur={(e) =>
+                            handleUpdateProduct(p.id, { price: parseFloat(e.target.value) || p.price })
+                          }
+                          className="w-20 px-2 py-1 border rounded-lg text-sm text-gray-800 ml-1 outline-none focus:ring-1 focus:ring-emerald-500"
+                        />
+                      </td>
+                      <td className="py-3 px-4">
+                        <input
+                          type="number"
+                          defaultValue={p.stock_quantity}
+                          onBlur={(e) =>
+                            handleUpdateProduct(p.id, { stock_quantity: parseInt(e.target.value) || 0 })
+                          }
+                          className="w-20 px-2 py-1 border rounded-lg text-sm text-gray-800 outline-none focus:ring-1 focus:ring-emerald-500"
+                        />
+                      </td>
+                      <td className="py-3 px-4">
+                        <button
+                          onClick={() => handleUpdateProduct(p.id, { is_available: !p.is_available })}
+                          className={`px-3 py-1 rounded-full text-xs font-bold transition ${
+                            p.is_available
+                              ? 'bg-emerald-100 text-emerald-800'
+                              : 'bg-rose-100 text-rose-800'
+                          }`}
+                        >
+                          {p.is_available ? 'Available' : 'Out of Stock'}
+                        </button>
+                      </td>
+                      <td className="py-3 px-4 text-right">
+                        <button
+                          onClick={async () => {
+                            if (confirm('Delete this product?')) {
+                              await supabase.from('products').delete().eq('id', p.id);
+                              setProducts((prev) => prev.filter((item) => item.id !== p.id));
+                            }
+                          }}
+                          className="text-xs font-semibold text-rose-600 hover:underline"
+                        >
+                          Delete
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
           </div>
         )}
-
-        {/* Form: Add New Product */}
-        <div className="bg-white p-6 rounded-2xl border shadow-sm space-y-4">
-          <h2 className="text-sm font-bold text-gray-900 border-b pb-2">Add New Product Item</h2>
-          <form onSubmit={handleAddProduct} className="grid grid-cols-1 md:grid-cols-2 gap-3 text-xs">
-            <div className="space-y-1">
-              <label className="font-semibold text-gray-700">Product Title</label>
-              <input
-                type="text"
-                required
-                placeholder="e.g. Amul Milk 500ml"
-                value={title}
-                onChange={(e) => setTitle(e.target.value)}
-                className="w-full px-3 py-2 border rounded-xl text-gray-900 focus:outline-none focus:ring-2 focus:ring-indigo-500"
-              />
-            </div>
-
-            <div className="space-y-1">
-              <label className="font-semibold text-gray-700">Price (₹)</label>
-              <input
-                type="number"
-                step="0.01"
-                required
-                placeholder="e.g. 32.00"
-                value={price}
-                onChange={(e) => setPrice(e.target.value)}
-                className="w-full px-3 py-2 border rounded-xl text-gray-900 focus:outline-none focus:ring-2 focus:ring-indigo-500"
-              />
-            </div>
-
-            <div className="space-y-1">
-              <label className="font-semibold text-gray-700">Category</label>
-              <select
-                value={category}
-                onChange={(e) => setCategory(e.target.value)}
-                className="w-full px-3 py-2 border rounded-xl text-gray-900 bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500"
-              >
-                <option value="Groceries">Groceries</option>
-                <option value="Dairy & Bakery">Dairy & Bakery</option>
-                <option value="Snacks & Beverages">Snacks & Beverages</option>
-                <option value="Personal Care">Personal Care</option>
-                <option value="Household">Household</option>
-              </select>
-            </div>
-
-            <div className="space-y-1">
-              <label className="font-semibold text-gray-700">Image URL (Optional)</label>
-              <input
-                type="url"
-                placeholder="https://..."
-                value={imageUrl}
-                onChange={(e) => setImageUrl(e.target.value)}
-                className="w-full px-3 py-2 border rounded-xl text-gray-900 focus:outline-none focus:ring-2 focus:ring-indigo-500"
-              />
-            </div>
-
-            <div className="md:col-span-2 pt-2">
-              <button
-                type="submit"
-                disabled={isAdding}
-                className="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-2.5 rounded-xl shadow-sm transition"
-              >
-                {isAdding ? 'Adding Product...' : '+ Add Item to Catalog'}
-              </button>
-            </div>
-          </form>
-        </div>
-
-        {/* Product Stock List */}
-        <div className="bg-white p-6 rounded-2xl border shadow-sm space-y-4">
-          <h2 className="text-sm font-bold text-gray-900 border-b pb-2">
-            Store Items ({products.length})
-          </h2>
-
-          {loading ? (
-            <div className="text-center py-8 text-gray-400">Loading store inventory...</div>
-          ) : products.length === 0 ? (
-            <div className="text-center py-8 text-gray-400">No products found for this store.</div>
-          ) : (
-            <div className="divide-y space-y-3">
-              {products.map((product) => (
-                <div key={product.id} className="pt-3 flex items-center justify-between">
-                  <div className="flex items-center gap-3">
-                    <img
-                      src={product.image_url}
-                      alt={product.title}
-                      className="w-12 h-12 object-cover rounded-xl border bg-gray-50"
-                    />
-                    <div>
-                      <h3 className="font-bold text-xs text-gray-900">{product.title}</h3>
-                      <p className="text-xs text-gray-500">
-                        ₹{product.price} • <span className="italic">{product.category}</span>
-                      </p>
-                    </div>
-                  </div>
-
-                  <button
-                    onClick={() => toggleStockStatus(product.id, product.is_available)}
-                    className={`text-xs font-bold px-3 py-1.5 rounded-xl border transition ${
-                      product.is_available
-                        ? 'bg-emerald-50 border-emerald-200 text-emerald-800 hover:bg-emerald-100'
-                        : 'bg-rose-50 border-rose-200 text-rose-800 hover:bg-rose-100'
-                    }`}
-                  >
-                    {product.is_available ? 'In Stock ✓' : 'Out of Stock ✕'}
-                  </button>
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
       </div>
+
+      {/* Add Product Modal */}
+      {isModalOpen && (
+        <AddProductModal
+          storeId={selectedStoreId}
+          onClose={() => setIsModalOpen(false)}
+          onProductAdded={(newProduct) => setProducts((prev) => [newProduct, ...prev])}
+        />
+      )}
     </div>
+  );
+}
+
+export default function InventoryPage() {
+  return (
+    <Suspense fallback={<div className="p-8 text-center">Loading Inventory Panel...</div>}>
+      <InventoryContent />
+    </Suspense>
   );
 }
